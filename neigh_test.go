@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package netlink
@@ -76,7 +77,8 @@ func TestNeighAddDelLLIPAddr(t *testing.T) {
 		LinkAttrs: LinkAttrs{Name: "neigh0"},
 		Local:     net.IPv4(127, 0, 0, 1),
 		IKey:      1234,
-		OKey:      1234}
+		OKey:      1234,
+	}
 	if err := LinkAdd(&dummy); err != nil {
 		t.Errorf("Failed to create link: %v", err)
 	}
@@ -142,7 +144,6 @@ func TestNeighAddDel(t *testing.T) {
 			IP:           entry.ip,
 			HardwareAddr: entry.mac,
 		})
-
 		if err != nil {
 			t.Errorf("Failed to NeighAdd: %v", err)
 		}
@@ -167,7 +168,6 @@ func TestNeighAddDel(t *testing.T) {
 			IP:           entry.ip,
 			HardwareAddr: entry.mac,
 		})
-
 		if err != nil {
 			t.Errorf("Failed to NeighDel: %v", err)
 		}
@@ -217,7 +217,6 @@ func TestNeighAddDelProxy(t *testing.T) {
 			Flags:     NTF_PROXY,
 			IP:        entry.ip,
 		})
-
 		if err != nil {
 			t.Errorf("Failed to NeighAdd: %v", err)
 		}
@@ -242,7 +241,6 @@ func TestNeighAddDelProxy(t *testing.T) {
 			Flags:     NTF_PROXY,
 			IP:        entry.ip,
 		})
-
 		if err != nil {
 			t.Errorf("Failed to NeighDel: %v", err)
 		}
@@ -324,7 +322,7 @@ func TestNeighSubscribe(t *testing.T) {
 	if err := NeighAdd(entry); err != nil {
 		t.Errorf("Failed to NeighAdd: %v", err)
 	}
-	if !expectNeighUpdate(ch, []NeighUpdate{NeighUpdate{
+	if !expectNeighUpdate(ch, []NeighUpdate{{
 		Type:  unix.RTM_NEWNEIGH,
 		Neigh: *entry,
 	}}) {
@@ -333,11 +331,12 @@ func TestNeighSubscribe(t *testing.T) {
 	if err := NeighDel(entry); err != nil {
 		t.Fatal(err)
 	}
-	if !expectNeighUpdate(ch, []NeighUpdate{NeighUpdate{
+	if !expectNeighUpdate(ch, []NeighUpdate{{
 		Type: unix.RTM_NEWNEIGH,
 		Neigh: Neigh{
 			State: NUD_FAILED,
-			IP:    entry.IP},
+			IP:    entry.IP,
+		},
 	}}) {
 		t.Fatalf("Del update not received as expected")
 	}
@@ -386,7 +385,7 @@ func TestNeighSubscribeWithOptions(t *testing.T) {
 	if err != nil {
 		t.Errorf("Failed to NeighAdd: %v", err)
 	}
-	if !expectNeighUpdate(ch, []NeighUpdate{NeighUpdate{
+	if !expectNeighUpdate(ch, []NeighUpdate{{
 		Type:  unix.RTM_NEWNEIGH,
 		Neigh: *entry,
 	}}) {
@@ -440,7 +439,7 @@ func TestNeighSubscribeAt(t *testing.T) {
 	if err != nil {
 		t.Errorf("Failed to NeighAdd: %v", err)
 	}
-	if !expectNeighUpdate(ch, []NeighUpdate{NeighUpdate{
+	if !expectNeighUpdate(ch, []NeighUpdate{{
 		Type:  unix.RTM_NEWNEIGH,
 		Neigh: *entry,
 	}}) {
@@ -517,17 +516,18 @@ func TestNeighSubscribeListExisting(t *testing.T) {
 	defer close(done)
 	if err := NeighSubscribeWithOptions(ch, done, NeighSubscribeOptions{
 		Namespace:    &newNs,
-		ListExisting: true},
+		ListExisting: true,
+	},
 	); err != nil {
 		t.Fatal(err)
 	}
 
 	if !expectNeighUpdate(ch, []NeighUpdate{
-		NeighUpdate{
+		{
 			Type:  unix.RTM_NEWNEIGH,
 			Neigh: *entry1,
 		},
-		NeighUpdate{
+		{
 			Type:  unix.RTM_NEWNEIGH,
 			Neigh: *entryBr,
 		},
@@ -547,7 +547,7 @@ func TestNeighSubscribeListExisting(t *testing.T) {
 		t.Errorf("Failed to NeighAdd: %v", err)
 	}
 
-	if !expectNeighUpdate(ch, []NeighUpdate{NeighUpdate{
+	if !expectNeighUpdate(ch, []NeighUpdate{{
 		Type:  unix.RTM_NEWNEIGH,
 		Neigh: *entry2,
 	}}) {
@@ -588,7 +588,6 @@ func TestNeighListExecuteStateFilter(t *testing.T) {
 			IP:           entry.ip,
 			HardwareAddr: entry.mac,
 		})
-
 		if err != nil {
 			t.Errorf("Failed to NeighAdd: %v", err)
 		}
@@ -601,7 +600,6 @@ func TestNeighListExecuteStateFilter(t *testing.T) {
 			IP:           entry.ip,
 			HardwareAddr: entry.mac,
 		})
-
 		if err != nil {
 			t.Errorf("Failed to NeighAdd: %v", err)
 		}
@@ -634,9 +632,87 @@ func TestNeighListExecuteStateFilter(t *testing.T) {
 			IP:           entry.ip,
 			HardwareAddr: entry.mac,
 		})
-
 		if err != nil {
 			t.Errorf("Failed to NeighDel: %v", err)
 		}
+	}
+}
+
+func TestNeighSet(t *testing.T) {
+	setUpNetlinkTestWithKModule(t, "ip_gre")
+
+	tearDown := setUpNetlinkTest(t)
+	defer tearDown()
+
+	dummy := Gretun{
+		LinkAttrs: LinkAttrs{Name: "neigh0"},
+		Local:     net.IPv4(127, 0, 0, 1),
+		IKey:      1234,
+		OKey:      1234,
+	}
+	if err := LinkAdd(&dummy); err != nil {
+		t.Errorf("Failed to create link: %v", err)
+	}
+	ensureIndex(dummy.Attrs())
+
+	initialMAC, err := net.ParseMAC("0a:ff:c6:8f:27:b7")
+	if err != nil {
+		t.Fatalf("failed to parse initial MAC address: %s", err.Error())
+	}
+
+	updatedMAC, err := net.ParseMAC("0a:ff:d4:09:aa:95")
+	if err != nil {
+		t.Fatalf("failed to parse initial MAC address: %s", err.Error())
+	}
+
+	// Use NeighSet for initial addition to test that it will create non-existent entries
+	entry := Neigh{
+		LinkIndex:    dummy.Index,
+		State:        NUD_PERMANENT,
+		IP:           net.IPv4(198, 51, 100, 2),
+		HardwareAddr: initialMAC,
+	}
+
+	err = NeighSet(&entry)
+	if err != nil {
+		t.Errorf("Failed to NeighSet: %v", err)
+	}
+
+	// Dump and see that all added entries are there
+	dump, err := NeighList(dummy.Index, 0)
+	if err != nil {
+		t.Errorf("Failed to NeighList: %v", err)
+	}
+
+	if !dumpContainsNeigh(dump, entry) {
+		t.Errorf("Dump does not contain: %v: %v", entry, dump)
+	}
+
+	// Update the entry and re-run NeighSet to ensure it updates existing entries,
+	// then check to ensure listed Neigh is updated
+	entry.HardwareAddr = updatedMAC
+
+	err = NeighSet(&entry)
+	if err != nil {
+		t.Errorf("Failed to NeighSet: %v", err)
+	}
+
+	dump, err = NeighList(dummy.Index, 0)
+	if err != nil {
+		t.Errorf("Failed to NeighList: %v", err)
+	}
+
+	if !dumpContainsNeigh(dump, entry) {
+		t.Errorf("Dump does not contain: %v: %v", entry, dump)
+	}
+
+	// Delete the entry
+	err = NeighDel(&entry)
+	if err != nil {
+		t.Errorf("Failed to NeighDel: %v", err)
+	}
+
+	if err := LinkDel(&dummy); err != nil {
+		t.Fatal(err)
 	}
 }
